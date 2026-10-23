@@ -261,3 +261,11 @@ Primary keys and unique keys are indexes too.
 | `uq_members_code` | `members(member_code)` | enforces unique codes and speeds lookup by code |
 | `idx_members_company` | `members(company_id)` | fast "all members of one company"; also used by the foreign key |
 | `idx_cleaning_log_run` | `cleaning_log(run_id)` | fast "show the lines of one cleaning run" |
+
+---
+
+## 7. Roles and least privilege
+
+vi_etl can read and write the data tables but cannot change the schema or grant rights. vi_app can only read member_snapshots. Each account gets only what its job needs. The data is health data (mood, heart rate, sleep), 
+so a leaked password or a bug should expose as little as possible. If the VI service is hacked or has an SQL bug, it can only read snapshots. It cannot read raw member data, change or delete rows, or drop tables. The ETL 
+account cannot drop tables either, so a bad loader script can’t destroy the schema. Separate accounts also show who did what in the logs.
