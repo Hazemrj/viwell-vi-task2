@@ -269,3 +269,31 @@ Primary keys and unique keys are indexes too.
 vi_etl can read and write the data tables but cannot change the schema or grant rights. vi_app can only read member_snapshots. Each account gets only what its job needs. The data is health data (mood, heart rate, sleep), 
 so a leaked password or a bug should expose as little as possible. If the VI service is hacked or has an SQL bug, it can only read snapshots. It cannot read raw member data, change or delete rows, or drop tables. The ETL 
 account cannot drop tables either, so a bad loader script can’t destroy the schema. Separate accounts also show who did what in the logs.
+
+---
+
+## 8. Data generation, loading and cleaning (1d)
+
+**Generation.** `scripts/generate_data.py` creates 500 members (45,000 daily rows) and 5,000 members (450,000 daily rows) over 90 days. It writes one CSV per table. It is the Task 1 generator, adapted to write CSV files.
+
+**Loading.** `scripts/load_data.py` uses `LOAD DATA LOCAL INFILE`, not row-by-row inserts. It runs in one transaction, so a failed load leaves nothing behind. `LOCAL` turns bad rows into warnings instead of errors, so the script checks the row count and warnings for every table.
+
+| Size | Raw daily rows | Load time |
+|---|---|---|
+| 500 members | 45,000 | 1.50 s |
+| 5,000 members | 450,000 | 14.20 s |
+
+**Server setting changed.** `LOAD DATA LOCAL INFILE` is off by default in MySQL 8 (error 3948). I ran `SET PERSIST local_infile = 1;` as root. The client also has to allow it (`local_infile=True` in the Python connection).
+
+**Cleaning in SQL.** `sql/clean_daily_metrics.sql` copies `raw_daily_metrics` into `daily_metrics` with `INSERT ... SELECT`. A `CASE` expression sets values outside the allowed range to NULL. The ranges match the CHECK constraints. The number removed per column is saved in `cleaning_log`.
+
+| Column | Rule | 500 members: removed | 5,000 members: removed |
+|---|---|---|---|
+| steps | 0 to 60,000 | 10 of 41,788 | 86 of 415,904 |
+| active_minutes | 0 to 600 | 4 of 41,788 | 42 of 415,904 |
+| sleep_hours | 2.0 to 14.0 | 8 of 41,788 | 86 of 415,904 |
+| resting_hr | 30 to 120 | 8 of 41,788 | 86 of 415,904 |
+
+**Planted cases fixed.** In Task 1, 2 of the 14 members planted to trigger escalation had only 2 low check-ins in their last 5 (the rule needs 3). Two near-miss members had only 1 low check-in instead of 2. 
+I corrected the patterns. The generator now stops with an error if a pattern does not match its name. `tests/test_planted_cases.py` also asks MySQL, with a window function, to check every planted case in the 
+loaded data: every escalation member has 3 or more low check-ins among the last 5, and every near-miss member has exactly 2. Ordinary members cannot meet the rule by accident.
